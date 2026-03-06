@@ -1,0 +1,10 @@
+{
+  "name": "convnext_efficientnetb4",
+  "description": "ConvNeXt + EfficientNet-B4 dual experts",
+  "model_type": "convnext_efficientnet",
+  "loss_type": "balanced_softmax",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": "loss",
+  "ordinal": false
+}

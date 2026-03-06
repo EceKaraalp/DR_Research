@@ -1,0 +1,10 @@
+{
+  "name": "ordinal_regression",
+  "description": "Ordinal regression for severity levels",
+  "model_type": "dual_expert_resnet_efficientnet",
+  "loss_type": "ordinal",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": true
+}

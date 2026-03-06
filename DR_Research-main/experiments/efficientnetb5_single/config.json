@@ -1,0 +1,10 @@
+{
+  "name": "efficientnetb5_single",
+  "description": "Single EfficientNet-B5 (stronger backbone)",
+  "model_type": "efficientnet_b5_single",
+  "loss_type": "focal",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": false
+}

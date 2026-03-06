@@ -1,0 +1,10 @@
+{
+  "name": "late_fusion_logit",
+  "description": "Late fusion: Logit averaging",
+  "model_type": "late_fusion_ensemble",
+  "loss_type": "focal",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": false
+}

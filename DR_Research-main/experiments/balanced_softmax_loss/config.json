@@ -1,0 +1,10 @@
+{
+  "name": "balanced_softmax_loss",
+  "description": "Baseline with Balanced Softmax loss",
+  "model_type": "dual_expert_resnet_efficientnet",
+  "loss_type": "balanced_softmax",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": false
+}

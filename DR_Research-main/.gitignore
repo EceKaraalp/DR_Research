@@ -1,0 +1,21 @@
+# Dataset
+APTOS 2019/
+
+# Virtual environment
+dr_env/
+
+# Training outputs
+results/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.h5
+
+# Large files
+*.zip

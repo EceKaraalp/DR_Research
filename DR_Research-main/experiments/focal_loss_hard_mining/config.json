@@ -1,0 +1,10 @@
+{
+  "name": "focal_loss_hard_mining",
+  "description": "Focal loss with hard example mining",
+  "model_type": "dual_expert_resnet_efficientnet",
+  "loss_type": "focal",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": "loss",
+  "ordinal": false
+}

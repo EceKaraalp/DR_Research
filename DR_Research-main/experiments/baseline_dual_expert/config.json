@@ -1,0 +1,10 @@
+{
+  "name": "baseline_dual_expert",
+  "description": "Original Dual-Expert ResNet50 + EfficientNetB4",
+  "model_type": "dual_expert_resnet_efficientnet",
+  "loss_type": "focal",
+  "augmentation": "standard",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": false
+}

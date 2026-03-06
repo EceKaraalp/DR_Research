@@ -1,0 +1,10 @@
+{
+  "name": "swin_transformer",
+  "description": "Pure Vision Transformer: Swin Transformer",
+  "model_type": "swin_transformer",
+  "loss_type": "focal",
+  "augmentation": "advanced",
+  "mixer": "mixcutmix",
+  "hard_mining": null,
+  "ordinal": false
+}
