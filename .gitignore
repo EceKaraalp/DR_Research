@@ -1,0 +1,34 @@
+# Git installer
+Git-2.53.0-64-bit.exe
+
+# Dataset folders (too large for git)
+APTOS 2019/
+APTOS2019/
+ODIR-5K/
+test_images/
+
+# Python environment
+DR_Research-main/aptos_env/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Model checkpoints (large files)
+*.pth
+*.pt
+*.h5
+*.ckpt
+
+# Results checkpoints
+DR_Research-main/results/checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Images (generated)
+*.png
