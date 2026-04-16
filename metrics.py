@@ -182,4 +182,33 @@ class MetricsCalculator:
         return class_metrics
 
 
+def compute_metrics(y_true, y_pred):
+    """
+    Standalone function to compute key metrics.
+    
+    Args:
+        y_true: True labels (array-like)
+        y_pred: Predicted labels (array-like)
+    
+    Returns:
+        tuple: (accuracy, f1_score, qwk_score)
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Accuracy
+    acc = accuracy_score(y_true, y_pred)
+    
+    # F1 Score (weighted for multi-class)
+    f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+    
+    # Quadratic Weighted Kappa (QWK)
+    try:
+        qwk = cohen_kappa_score(y_true, y_pred, weights='quadratic')
+    except:
+        qwk = 0.0
+    
+    return float(acc), float(f1), float(qwk)
+
+
 

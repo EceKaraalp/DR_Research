@@ -15,11 +15,12 @@ import time
 import traceback
 from typing import Tuple
 
-# Import custom modules
-from dataset_loader import APTOS2019DatasetLoader, get_data_loaders
-from cvitsnet_model import build_cvitsnet, count_parameters
-from metrics import MetricsCalculator
-from visualize import TrainingVisualizer
+from data.dataset import DRDataset
+from data.transforms import get_transforms
+from models.lamca_net import LAMCANet
+from losses.combined_loss import CombinedLoss
+from utils.metrics import MetricsCalculator
+from utils.visualize import TrainingVisualizer
 
 
 # Set seeds for reproducibility
@@ -32,28 +33,33 @@ if torch.cuda.is_available():
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-class CVitsNetTrainer:
-    """Main training orchestrator for CViTS-Net."""
-    
+class LAMCANetTrainer:
+    """Main training orchestrator for LAMCA-Net."""
     def __init__(self, 
-                 dataset_path: str = "APTOS2019",
+                 train_csv: str = "APTOS2019/train.csv",
+                 val_csv: str = "APTOS2019/valid.csv",
+                 test_csv: str = "APTOS2019/test.csv",
+                 img_dir: str = "APTOS2019/train_images",
                  output_dir: str = "results",
                  model_dir: str = "trained_model",
                  batch_size: int = 16,
                  epochs: int = 100,
                  learning_rate: float = 0.001,
                  weight_decay: float = 0.0001,
+                 num_workers: int = 4,
                  max_retries: int = 3):
-        self.dataset_path = dataset_path
+        self.train_csv = train_csv
+        self.val_csv = val_csv
+        self.test_csv = test_csv
+        self.img_dir = img_dir
         self.output_dir = Path(output_dir)
         self.model_dir = Path(model_dir)
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.num_workers = num_workers
         self.max_retries = max_retries
-        
-        # Create directories
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.plots_dir = self.output_dir / "plots"
@@ -64,13 +70,12 @@ class CVitsNetTrainer:
         # Initialize components
         self.model = None
         self.optimizer = None
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = None
         self.train_loader = None
         self.val_loader = None
         self.test_loader = None
         self.history = {}
         self.test_history = {}
-        
         self.visualizer = TrainingVisualizer(str(self.plots_dir))
         
     def load_data_with_retry(self) -> bool:
@@ -79,15 +84,14 @@ class CVitsNetTrainer:
                 print(f"\n{'='*80}")
                 print(f"Loading dataset (Attempt {attempt + 1}/{self.max_retries})")
                 print(f"{'='*80}")
-                
-                self.train_loader, self.val_loader, self.test_loader, \
-                self.class_weights, (self.X_train, self.y_train, self.X_val, 
-                                    self.y_val, self.X_test, self.y_test) = \
-                    get_data_loaders(self.dataset_path, self.batch_size)
-                
+                train_dataset = DRDataset(self.train_csv, self.img_dir, transform=get_transforms('train'))
+                val_dataset = DRDataset(self.val_csv, self.img_dir, transform=get_transforms('val'))
+                test_dataset = DRDataset(self.test_csv, self.img_dir, transform=get_transforms('test'))
+                self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+                self.val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+                self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
                 print("Dataset loaded successfully!")
                 return True
-                
             except Exception as e:
                 print(f"Data loading attempt {attempt + 1} failed: {str(e)}")
                 if attempt < self.max_retries - 1:
@@ -103,27 +107,17 @@ class CVitsNetTrainer:
     def build_model(self) -> bool:
         try:
             print(f"\n{'='*80}")
-            print("Building CViTS-Net Model")
+            print("Building LAMCA-Net Model")
             print(f"{'='*80}")
-            
-            self.model = build_cvitsnet(num_classes=5, image_size=224)
-            self.model = self.model.to(device)
-            
-            # AdamW optimizer
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(),
-                lr=self.learning_rate,
-                weight_decay=self.weight_decay
-            )
-            
-            total_params = count_parameters(self.model)
+            self.model = LAMCANet(num_classes=5).to(device)
+            self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+            self.criterion = CombinedLoss()
+            total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             print(f"\nTotal Trainable Parameters: {total_params:,}")
             print(f"Device: {device}")
             if torch.cuda.is_available():
                 print(f"GPU: {torch.cuda.get_device_name(0)}")
-            
             return True
-            
         except Exception as e:
             print(f"Error building model: {str(e)}")
             traceback.print_exc()
@@ -418,34 +412,33 @@ class CVitsNetTrainer:
 
 
 def main():
-    """Main entry point."""
     print(f"\n{'#'*80}")
-    print("CViTS-Net Training Pipeline for APTOS2019 Blindness Detection (PyTorch)")
+    print("LAMCA-Net Training Pipeline for APTOS2019 Blindness Detection (PyTorch)")
     print(f"{'#'*80}\n")
     print(f"Device: {device}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
-    
-    trainer = CVitsNetTrainer(
-        dataset_path="APTOS2019",
+    trainer = LAMCANetTrainer(
+        train_csv="APTOS2019/train.csv",
+        val_csv="APTOS2019/valid.csv",
+        test_csv="APTOS2019/test.csv",
+        img_dir="APTOS2019/train_images",
         output_dir="results",
         model_dir="trained_model",
         batch_size=16,
         epochs=100,
         learning_rate=0.001,
         weight_decay=0.0001,
+        num_workers=4,
         max_retries=3
     )
-    
     success = trainer.run_full_pipeline()
-    
     if success:
         print("\n✓ Training completed successfully!")
         sys.exit(0)
     else:
         print("\n✗ Training failed!")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

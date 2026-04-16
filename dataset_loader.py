@@ -80,9 +80,9 @@ class APTOS2019DatasetLoader:
                     raise
     
     def load_train_validation_test_split(self, 
-                                        train_ratio: float = 0.7,
+                                        train_ratio: float = 0.8,
                                         val_ratio: float = 0.1,
-                                        test_ratio: float = 0.2) -> Tuple:
+                                        test_ratio: float = 0.1) -> Tuple:
         """Load APTOS2019 training data and split into train/validation/test."""
         train_csv_path = self.dataset_path / "train.csv"
         if not train_csv_path.exists():
@@ -92,6 +92,14 @@ class APTOS2019DatasetLoader:
         
         print(f"Total training samples: {len(df_train)}")
         print(f"Class distribution:\n{df_train['diagnosis'].value_counts().sort_index()}")
+        
+        # Kullanıcının resmi yüklemeden önce kaça kaç bölündüğünü görmesi için bilgi ekranı
+        total_samples = len(df_train)
+        print("\n--- Öngörülen Veri Dağılımı ---")
+        print(f"Eğitim (Train) : ~{int(total_samples * train_ratio)} örnek (%{train_ratio * 100:.1f})")
+        print(f"Doğrulama (Val): ~{int(total_samples * val_ratio)} örnek (%{val_ratio * 100:.1f})")
+        print(f"Test (Test)    : ~{int(total_samples * test_ratio)} örnek (%{test_ratio * 100:.1f})")
+        print("-------------------------------\nResimler diske yüklenmeye başlıyor, lütfen bekleyin...\n")
         
         images = []
         labels = []
@@ -125,17 +133,20 @@ class APTOS2019DatasetLoader:
         print(f"Successfully loaded {len(images)} images")
         
         # Split into train, validation, test
+        # test_ratio oranında veriyi direkt test seti olarak ayırıyoruz
         X_temp, X_test, y_temp, y_test = train_test_split(
             images, labels, 
-            test_size=test_ratio / (train_ratio + val_ratio),
+            test_size=test_ratio,
             random_state=42, 
             stratify=labels
         )
         
-        val_split = val_ratio / (train_ratio + val_ratio)
+        # Kalan veriyi (X_temp), istenen validation oranına ulaşacak şekilde bölüyoruz.
+        # Temp verisinin ne kadarının val_ratio'ya denk geldiğini bulmalıyız: val_ratio / (train_ratio + val_ratio)
+        val_split_from_temp = val_ratio / (train_ratio + val_ratio)
         X_train, X_val, y_train, y_val = train_test_split(
             X_temp, y_temp,
-            test_size=val_split,
+            test_size=val_split_from_temp,
             random_state=42,
             stratify=y_temp
         )
