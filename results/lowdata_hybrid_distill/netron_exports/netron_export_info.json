@@ -1,0 +1,12 @@
+{
+  "best_model": "TS_ConvNeXtTiny_Residual",
+  "checkpoint_used": "results\\lowdata_hybrid_distill\\best_overall_model.pth",
+  "student_ts_path": "results\\lowdata_hybrid_distill\\netron_exports\\TS_ConvNeXtTiny_Residual_student_only.pt",
+  "student_onnx_path": "results\\lowdata_hybrid_distill\\netron_exports\\TS_ConvNeXtTiny_Residual_student_only.onnx",
+  "onnx_export_ok": false,
+  "onnx_export_error": "No module named 'onnxscript'",
+  "missing_keys_count": 0,
+  "unexpected_keys_count": 0,
+  "missing_keys_preview": [],
+  "unexpected_keys_preview": []
+}
