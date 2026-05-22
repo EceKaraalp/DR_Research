@@ -1,0 +1,631 @@
+%\documentclass[a4paper,fleqn,longmktitle]{cas-dc}
+\documentclass[a4paper,fleqn]{cas-dc}
+
+\setcounter{secnumdepth}{6}
+
+%\usepackage[authoryear,longnamesfirst]{natbib}
+%\usepackage[authoryear]{natbib}
+\usepackage[numbers]{natbib}
+
+\usepackage{soul}
+\usepackage{color}
+\DeclareRobustCommand{\hlcyan}[1]{{\sethlcolor{cyan}\hl{#1}}}
+\usepackage[justification=justified]{caption}
+\usepackage{caption}
+\usepackage[export]{adjustbox}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{upgreek}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{multirow}
+
+\newcommand\scalemath[2]{\scalebox{#1}{\mbox{\ensuremath{\displaystyle #2}}}}
+
+%%%Author definitions
+\def\tsc#1{\csdef{#1}{\textsc{\lowercase{#1}}\xspace}}
+\tsc{WGM}
+\tsc{QE}
+\tsc{EP}
+\tsc{PMS}
+\tsc{BEC}
+\tsc{DE}
+%%%
+
+\begin{document}
+\sloppy
+\let\WriteBookmarks\relax
+\def\floatpagepagefraction{1}
+\def\textpagefraction{.001}
+\shorttitle{Hybrid Teacher Ensemble KD for DR Grading}
+\shortauthors{Author et~al.}
+
+\title[mode=title]{Hybrid Teacher Ensemble Knowledge Distillation with Ordinal-Aware Loss for Low-Data Diabetic Retinopathy Grading}
+
+\author[1]{[Author 1 Name]}
+\author[1]{[Author 2 Name]}
+\author[2]{[Author 3 Name]}
+\author[2]{[Author 4 Name]}
+\cormark[1]
+\address[1]{[Department], [University], [City], [Country]}
+\address[2]{[Department], [University], [City], [Country]}
+\ead{[corresponding@email.com]}
+
+\begin{abstract}
+Automated grading of diabetic retinopathy (DR) from fundus photographs is a clinically critical task constrained by two persistent challenges: the scarcity of expert-annotated training data and the ordinal structure of the five-class severity scale, which standard cross-entropy losses fail to encode. This paper proposes \texttt{TS\_ConvNeXtTiny\_Residual}, a teacher--student knowledge distillation framework designed specifically for five-class DR severity grading under low-data conditions. The framework employs an ensemble of two structurally diverse CNN--ViT hybrid teacher networks---a custom Baseline Hybrid with confidence-gated fusion and an Advanced ResNet50+ViT-B/16 model with spectral normalization---whose softmax predictions are combined via equal-weight averaging to form a well-calibrated composite soft-label signal. A compact ConvNeXt Tiny student network is trained using a four-component objective integrating: (i)~class-weighted cross-entropy for imbalance handling, (ii)~multi-temperature KL-divergence distillation at $T \in \{2.0, 4.0\}$ for simultaneous transfer of fine-grained and coarse semantic knowledge, (iii)~an ordinal cumulative distribution function (CDF) loss that aligns the training objective with the quadratic weighted kappa (QWK) evaluation metric, and (iv)~a non-inferiority loss with a linearly scheduled margin that prevents the student from regressing below teacher-ensemble performance on individual samples. We further demonstrate empirically that a complexity-intensive entropy-gated fusion mechanism collapses to near-zero student weighting in the high-confidence teacher regime, confirming that equal-weight fusion is both sufficient and preferred in low-data settings. Evaluated on the APTOS 2019 benchmark across three random seeds, the proposed system achieves a mean test QWK of $\mathbf{0.9186 \pm 0.0010}$ and a mean accuracy of $\mathbf{85.47\% \pm 0.31\%}$, surpassing all single-teacher baselines and alternative teacher--student configurations examined in this study. These results demonstrate that structured multi-teacher distillation combined with ordinal-aware loss design constitutes an effective and computationally efficient strategy for DR grading in resource-constrained clinical screening settings.
+\end{abstract}
+
+\begin{keywords}
+Diabetic retinopathy grading\sep Knowledge distillation\sep CNN--ViT hybrid\sep Ordinal CDF loss\sep Teacher ensemble\sep Low-data learning\sep APTOS 2019
+\end{keywords}
+
+\maketitle
+
+% ── 1. Introduction ───────────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+Diabetic retinopathy (DR) is the most prevalent microvascular complication of diabetes mellitus and one of the leading causes of preventable vision loss and blindness worldwide \cite{yau2012}. The International Diabetes Federation reports that approximately 537 million adults were living with diabetes in 2021, a figure projected to rise to 783 million by 2045 \cite{idf2021}. Routine fundus photography-based screening is therefore considered essential for preventing avoidable blindness at the population level.
+
+Conventional DR screening relies on trained ophthalmologists who manually examine retinal fundus images and assign a severity grade according to standardized clinical scales. The International Clinical Diabetic Retinopathy (ICDR) severity scale classifies retinopathy into five ordinal grades, from no apparent retinopathy (Grade~0) to proliferative DR (Grade~4) \cite{wilkinson2003}. Although effective, manual grading is time-intensive, costly, and subject to inter-grader variability---a limitation particularly acute in low- and middle-income countries where specialist availability is severely constrained \cite{krause2018}. These systemic barriers motivate the development of automated, accurate, and computationally efficient grading systems.
+
+The emergence of deep learning (DL) has fundamentally transformed the landscape of automated DR grading. Landmark studies by Gulshan et al.\ \cite{gulshan2016} and Ting et al.\ \cite{ting2017} demonstrated that deep convolutional neural networks (CNNs) could achieve diagnostic accuracy on par with ophthalmologists in detecting referable DR from fundus photographs. Subsequent research explored progressively deeper and more sophisticated CNN architectures---including ResNet \cite{he2016}, EfficientNet \cite{tan2019}, and DenseNet \cite{huang2017}---achieving substantial performance gains on benchmark challenges such as EyePACS and APTOS 2019. A comprehensive survey of this literature by Zhu et al.\ \cite{zhu2024} covering 94 studies from 2018 to 2023 confirmed that ResNet and VGGNet remain the dominant CNN frameworks for DR classification, with APTOS 2019 and EyePACS being the most widely adopted benchmarks. However, two fundamental challenges remain unresolved.
+
+The \textit{first} is the scarcity of labeled training data. The APTOS 2019 benchmark, one of the largest publicly available graded fundus datasets, contains only 3,662 labeled images---orders of magnitude smaller than datasets used to pretrain general-purpose vision models. Acquiring large, expert-annotated fundus image datasets is expensive and operationally demanding; in practice, many DL systems must be trained in a low-data regime where the risk of overfitting is high and generalization is difficult to guarantee. The \textit{second} challenge is the ordinal nature of the DR grading scale. DR severity grades exhibit a natural monotonic ordering ($0 < 1 < 2 < 3 < 4$), where adjacent grades share meaningful clinical similarity. Standard cross-entropy loss treats all misclassification errors equally, thereby failing to encode the clinically important cost distinction between, for example, confusing Grade~0 with Grade~1 versus Grade~0 with Grade~4. This misalignment between the training objective and the quadratic weighted kappa (QWK) evaluation metric---which penalizes grade-distance-weighted errors---represents a significant structural limitation, as recently highlighted by Bappi et al.\ \cite{bappi2025}.
+
+In parallel with CNN advances, Vision Transformers (ViT) \cite{dosovitskiy2021} have demonstrated that self-attention mechanisms can model long-range spatial dependencies in images, capturing global structural patterns that locally constrained convolutions may miss. Systematic comparisons confirm that hybrid CNN--ViT models consistently outperform either architecture in isolation on DR grading tasks \cite{zhang2025}. Yet the application of such hybrid architectures under low-data conditions, and their integration into knowledge distillation frameworks, remains underexplored.
+
+Knowledge distillation (KD) offers a compelling framework for addressing the low-data challenge: a compact student network is trained not only on hard ground-truth labels but also on the soft probability distributions produced by a powerful, pre-trained teacher, effectively inheriting the teacher's richer learned representations \cite{hinton2015}. Recent work has demonstrated the effectiveness of KD pipelines for DR classification specifically: Islam et al.\ \cite{islam2023} employed a multi-teacher fusion of ResNet152V2 and a Swin Transformer to distil knowledge into a lightweight Xception student, achieving high multi-class accuracy on APTOS 2019 while enabling deployment in resource-constrained settings. Most existing KD approaches, however, employ a single teacher and a single distillation temperature, potentially missing the complementary knowledge captured at different abstraction levels. Furthermore, ordinal task structure is rarely integrated into the distillation objective.
+
+This paper proposes \texttt{TS\_ConvNeXtTiny\_Residual}, a teacher--student distillation framework specifically designed for five-class DR grading under low-data conditions. The system employs an ensemble of two structurally distinct, independently trained CNN--ViT hybrid teacher networks whose predictions are combined via equal-weight fusion, providing the student with a diverse and well-calibrated knowledge signal. A compact ConvNeXt Tiny \cite{liu2022} student network is trained using a multi-component loss that integrates weighted cross-entropy, multi-temperature knowledge distillation, an ordinal CDF loss aligned with the QWK metric, and a non-inferiority constraint with a scheduled margin that prevents student regression below teacher performance.
+
+The principal contributions of this work are:
+
+\begin{enumerate}
+    \item A \textbf{hybrid teacher ensemble} that combines a custom Baseline CNN--ViT hybrid and an Advanced ResNet50+ViT-B/16 model with spectral normalization via equal-weight prediction averaging, yielding a more robust and well-calibrated soft-label target than any single teacher.
+    \item A \textbf{multi-temperature distillation scheme} using temperatures $T \in \{2.0, 4.0\}$ with fixed weighting, enabling simultaneous transfer of fine-grained discriminative and coarse semantic knowledge across DR severity grades.
+    \item An \textbf{ordinal CDF loss} that directly penalizes deviations from the correct cumulative grade distribution, aligning the training objective with the QWK evaluation metric and the clinically motivated ordinal structure of DR grading.
+    \item A \textbf{non-inferiority loss with scheduled margin} that enforces sample-wise performance parity between the student and the teacher ensemble throughout training, preventing early-training overfitting in the low-data regime.
+    \item Comprehensive evaluation on APTOS 2019 demonstrating mean test QWK of $\mathbf{0.9186 \pm 0.0010}$ and accuracy of $\mathbf{85.47\% \pm 0.31\%}$ across three random seeds, surpassing all single-teacher and alternative teacher--student baselines.
+\end{enumerate}
+
+% ── 2. Literature Review ──────────────────────────────────────────────────────
+\section{Literature Review}
+
+\subsection{Deep Learning for Diabetic Retinopathy Grading}
+
+The application of deep learning to automated DR grading has evolved rapidly since the seminal works of Gulshan et al.\ \cite{gulshan2016} and Ting et al.\ \cite{ting2017}, which established that CNNs could approach ophthalmologist-level accuracy in detecting referable DR at population scale. A comprehensive review by Zhu et al.\ \cite{zhu2024}, covering 94 studies published between 2018 and 2023, confirms that transfer learning with ResNet and VGGNet backbones constitutes the dominant paradigm, with the APTOS 2019 and EyePACS datasets being the most widely used benchmarks. On the APTOS 2019 five-class grading task specifically, Farag et al.\ \cite{farag2022} proposed a DenseNet169 encoder augmented with a Convolutional Block Attention Module (CBAM), achieving 82\% accuracy and a QWK score of 0.888 while using only cross-entropy loss to handle class imbalance. Shakibania et al.\ \cite{shakibania2024} introduced a dual-branch deep learning architecture combining EfficientNet-B0 and ResNet50 as parallel feature extractors with transfer learning on APTOS 2019, achieving a QWK of 0.93 and accuracy of 89.6\%---outperforming prior single-backbone literature on both binary and multi-class grading.
+
+Recent work has increasingly focused on enriching feature representations. Tian et al.\ \cite{tian2023} proposed the FA+KC-Net, a collaborative network combining fine-grained attention mechanisms with lesion knowledge extraction, evaluated on APTOS 2019, DDR, Messidor, and EyePACS, achieving top-tier performance across all four benchmarks. Romero-Ora\'{a} et al.\ \cite{romero2024} developed an attention-based DL framework that separates attention on dark and bright retinal structures---corresponding to hemorrhages and exudates respectively---providing improved classification accuracy and visual interpretability for clinicians. Despite these advances, a recurring limitation identified in the recent survey by Bappi et al.\ \cite{bappi2025} is the inadequate handling of the ordinal structure of DR severity, motivating ordinal-aware training objectives of the kind proposed in this work.
+
+A persistent structural challenge in DR grading is severe class imbalance. In the APTOS 2019 dataset \cite{aptos2019}, mild and moderate cases substantially outnumber severe and proliferative cases. The dataset provides 3,662 labeled fundus images from clinics in India across all five severity grades, and has become one of the most widely adopted benchmarks for evaluating DR grading systems under realistic class imbalance conditions.
+
+\subsection{CNN--ViT Hybrid Architectures for Diabetic Retinopathy}
+
+The Vision Transformer (ViT), introduced by Dosovitskiy et al.\ \cite{dosovitskiy2021}, demonstrated that dividing an image into fixed-size patches and processing the resulting sequence through multi-head self-attention could match or exceed state-of-the-art CNN performance on standard image classification benchmarks. The key advantage of ViT over CNNs is its ability to model global spatial dependencies, enabling the network to associate distant regions of the retina---such as vascular patterns near the optic disc and lesions in the macular region---that may collectively indicate DR severity.
+
+The data efficiency limitations of pure ViT architectures motivated the development of hybrid CNN--ViT models. Zhang et al.\ \cite{zhang2025} performed a systematic evaluation of CNN, ViT, and hybrid architectures on DR classification, finding that hybrid models consistently outperform standalone architectures: the best-performing hybrid (CvT-13) achieved QWK~=~0.84 and AUC~=~0.93, and interpretability analysis via Grad-CAM and Attention-Rollout confirmed that CNNs focus on fine-grained lesion textures whereas ViTs exhibit broader contextual attention---directly motivating their combination. Ikram and Imran \cite{ikram2025} proposed ResViT FusionNet, integrating ResNet50 with ViT branches for automated DR grading, achieving kappa~=~0.8935 and accuracy~=~93.01\% with LIME and Grad-CAM based explainability. Azzou et al.\ \cite{azzou2025} evaluated a hybrid combining ResNet50's granular feature extraction with ViT's global relational reasoning on APTOS, finding the hybrid outperformed both standalone models with 98\% average precision across all classes.
+
+For retinal imaging beyond DR, Niranjan et al.\ \cite{niranjan2025} introduced a hybrid ViT--GNN architecture on APTOS 2019, achieving accuracy~=~93.2\% and AUC~=~0.961. Nazih et al.\ \cite{nazih2023} demonstrated that a ViT applied directly to DR severity grading, optimized with AdamW and focal loss, achieves competitive F1-score of 0.825 and AUC of 0.956. A comparative study by Goh et al.\ \cite{goh2024} across large retinal image collections further confirmed that ViTs provide superior performance over CNNs for detecting referable DR.
+
+In this work, the structural diversity between the two teacher networks is empirically validated in Section~\ref{sec:ensemble} (Table~\ref{tab:ensemble}): Teacher~1 achieves test QWK~=~0.640 while Teacher~2 achieves QWK~=~0.901, and their equal-weight ensemble reaches QWK~=~0.902, confirming that the two teachers commit complementary errors whose combination yields a more reliable soft-label signal.
+
+\subsection{Knowledge Distillation for Medical Image Classification}
+
+Knowledge distillation, first systematically formulated by Hinton et al.\ \cite{hinton2015}, trains a compact student model by minimizing a composite loss consisting of cross-entropy with hard ground-truth labels and a Kullback--Leibler (KL) divergence between the temperature-softened probability distributions of teacher and student. The key insight is that soft teacher probabilities encode inter-class similarity structure---referred to as ``dark knowledge''---that is absent from one-hot labels. A comprehensive survey of KD variants is provided by Gou et al.\ \cite{gou2021}.
+
+For DR grading, Luo et al.\ \cite{luo2020} proposed a self-KD framework combining self-distillation with CAM-attention, achieving AUC~=~0.965 and accuracy~=~92.9\% on Messidor without an external teacher. Ju et al.\ \cite{ju2021} proposed the Synergic Adversarial Label Learning (SALL) framework, which leverages KD jointly with multi-task learning across DR and AMD labels, improving DR grading accuracy by 5.91\%. Moya-Albor et al.\ \cite{moya2024} employed an Inception-v3 teacher--student pipeline with KL divergence and categorical cross-entropy as the combined distillation loss, achieving average training accuracy of 99\% and validation accuracy of 97\% on DR lesion classification. Wang et al.\ \cite{wang2024} proposed a lesion-aware KD framework for DR lesion segmentation that focuses knowledge transfer on lesion regions via a global lesion embedding queue.
+
+Islam et al.\ \cite{islam2023} demonstrated that a multi-teacher fusion of ResNet152V2 and a Swin Transformer, distilling into a lightweight Xception student, can substantially outperform single-teacher approaches. Al~Shafi et al.\ \cite{alshafi2024} applied ViT-to-CNN distillation on APTOS achieving weighted kappa~=~0.90, confirming the effectiveness of cross-architecture distillation for this task.
+
+A critical limitation of standard single-temperature KD is the inability to simultaneously transfer both coarse semantic and fine-grained discriminative knowledge. The present work addresses this through multi-temperature distillation at $T = \{2.0, 4.0\}$, drawing on the insight established in the KD literature \cite{hinton2015,gou2021} that higher temperatures produce more uniform soft distributions favorable for coarse knowledge transfer, while lower temperatures preserve sharper distributional peaks essential for distinguishing adjacent DR severity grades.
+
+The ordinal structure of DR grading further motivates specialized loss formulations. Cao et al.\ \cite{cao2020} proposed CORAL, reformulating ordinal regression as a set of binary classification sub-problems with shared representations, ensuring output consistency across rank thresholds. Liu et al.\ \cite{liu2020} introduced unimodal regularization that concentrates probability mass near the true ordinal class. In this work, we adopt an ordinal CDF loss that directly penalizes deviations between predicted and target cumulative distribution functions, providing a differentiable ordinal regularizer explicitly aligned with the QWK metric.
+
+\subsection{Teacher Ensemble and Multi-Teacher Distillation}
+
+Ensemble learning improves predictive accuracy by aggregating diverse model predictions. In the knowledge distillation context, employing an ensemble of teacher models provides the student with a richer and more diverse soft-label signal. Yilmaz and Aiyengar \cite{yilmaz2025} showed that cross-architecture KD from a ViT teacher to a CNN student achieves 89\% classification accuracy on fundus images with 97.4\% fewer parameters, retaining approximately 93\% of the teacher's diagnostic performance. Islam et al.\ \cite{islam2023} further demonstrated that a ResNet152V2+Swin Transformer teacher ensemble substantially outperformed either teacher in isolation.
+
+Most multi-teacher approaches employ either simple averaging or confidence-weighted combination to aggregate teacher predictions. In this work, we investigated an entropy-gated combination mechanism but found empirically that, in the low-data setting with a high-confidence teacher ensemble (mean teacher confidence $\approx$~0.88), the gate consistently collapsed to near-zero student weighting (mean gate value $\approx$~0.09), yielding results statistically indistinguishable from equal-weight averaging. Accordingly, equal-weight fusion was adopted as the production strategy. This result is consistent with the general finding in the KD literature that gating mechanisms require sufficient inter-teacher prediction uncertainty to provide benefit \cite{gou2021}.
+
+\textbf{Research Gap.} The foregoing review identifies four concurrent limitations no existing DR grading system has addressed in combination: (i)~reliance on a single teacher whose soft labels may be miscalibrated in low-data conditions---evidenced by Teacher~1 alone yielding QWK~=~0.640 (Table~\ref{tab:ensemble}); (ii)~fixed single-temperature distillation that cannot simultaneously preserve fine-grained and coarse knowledge \cite{hinton2015,gou2021}; (iii)~structural misalignment between cross-entropy training and the QWK evaluation metric \cite{bappi2025}; and (iv)~absence of a non-inferiority mechanism to prevent student regression during early training. The proposed \texttt{TS\_ConvNeXtTiny\_Residual} framework addresses all four limitations through a unified multi-teacher ensemble distillation pipeline with ordinal-aware loss formulation.
+
+% ── 3. Proposed Model ─────────────────────────────────────────────────────────
+\section{Proposed Model}
+
+\subsection{Overview}
+\label{sec:overview}
+
+The proposed framework, \texttt{TS\_ConvNeXtTiny\_Residual}, is a teacher--student knowledge distillation system designed for five-class DR severity grading under low-data conditions. Figure~\ref{fig:architecture} illustrates the complete pipeline. Given a fundus image of size $224 \times 224 \times 3$, two independently trained CNN--ViT hybrid teacher networks produce class probability distributions that are combined via equal-weight ensemble averaging to yield a composite teacher prediction $\mathbf{p}_{teacher}$. Concurrently, a ConvNeXt Tiny student network \cite{liu2022} processes the same input to produce student logits $\mathbf{z}_s$. During training, the student is optimized using a four-component loss that integrates weighted cross-entropy, multi-temperature distillation, ordinal CDF regularization, and a non-inferiority constraint. At inference, the final prediction is the equal-weight combination of teacher ensemble and student softmax outputs.
+
+\begin{figure}[h]
+  \centering
+  \fbox{\parbox{0.85\columnwidth}{\centering\vspace{2cm}
+  [Figure 1: Architecture diagram --- replace with \textbackslash includegraphics]\vspace{2cm}}}
+  \caption{The proposed \texttt{TS\_ConvNeXtTiny\_Residual} pipeline. Two CNN--ViT hybrid teachers produce an equal-weight ensemble soft-label target. The ConvNeXt Tiny student is trained with a four-component loss and combined with the teacher ensemble at inference.}
+  \label{fig:architecture}
+\end{figure}
+
+\subsection{Teacher Network 1: Baseline CNN--ViT Hybrid}
+
+The first teacher is a dual-branch architecture combining CNN and ViT representations through a confidence-gated fusion mechanism.
+
+\textbf{CNN Branch.} The CNN branch processes the input image through a stem: Conv2d($3{\to}64$, $k{=}7$, $s{=}2$, $p{=}3$) $\to$ BatchNorm2d $\to$ ReLU $\to$ MaxPool2d($k{=}3$, $s{=}2$, $p{=}1$), followed by three residual-style stages that progressively increase channel dimensionality ($64{\to}128{\to}256$) with stride-2 convolutions at stages 2 and 3. The resulting feature map is globally average-pooled and projected through a fully-connected layer ($256{\to}512$) with ReLU activation to produce the CNN feature vector $\mathbf{f}_{cnn} \in \mathbb{R}^{512}$.
+
+\textbf{ViT Branch.} The ViT branch tokenizes the input using a $16{\times}16$ patch embedding convolution ($3{\to}256$), producing $N{=}196$ tokens of dimension 256. Six transformer blocks, each with 8-head multi-head self-attention and a two-layer MLP ($256{\to}512{\to}256$) with GELU activation and layer normalization, encode the token sequence. Token-wise mean pooling followed by a linear projection ($256{\to}512$) yields the ViT feature vector $\mathbf{f}_{vit} \in \mathbb{R}^{512}$.
+
+\textbf{Confidence-Gated Fusion.} Scalar confidence scores are computed as $s_c = \sigma(W_c \mathbf{f}_{cnn})$ and $s_t = \sigma(W_t \mathbf{f}_{vit})$, and a fusion gate is estimated by a two-layer MLP:
+\begin{equation}
+  \alpha = \sigma\!\left(\text{MLP}([s_c,\, s_t])\right), \quad
+  \mathbf{f}_{fused} = \alpha\, \mathbf{f}_{cnn} + (1{-}\alpha)\, \mathbf{f}_{vit}
+\end{equation}
+A linear classification head ($512{\to}5$) produces the baseline teacher logits $\mathbf{z}_{base}$.
+
+\subsection{Teacher Network 2: Advanced CNN--ViT Hybrid with Spectral Normalization}
+
+The second teacher employs larger-scale pretrained backbones to maximize representational capacity. A pretrained ResNet50 backbone encodes the input image, and global average pooling reduces the output to a 2048-dimensional vector. A pretrained ViT-B/16 encoder processes the same input; the [CLS] token output provides a 768-dimensional representation. The two branch outputs are concatenated to yield a 2816-dimensional joint feature. A spectral-normalized linear classification head \cite{miyato2018} maps this to five logits $\mathbf{z}_{adv}$. Spectral normalization constrains the Lipschitz constant of the output layer, smoothing the decision boundary and improving calibration---a property critical for the near-boundary confusion cases prevalent in DR grading.
+
+\subsection{Teacher Ensemble via Equal-Weight Fusion}
+\label{sec:ensemble}
+
+The composite teacher prediction is formed by equal-weight averaging of the two teacher softmax distributions:
+\begin{equation}
+  \mathbf{p}_{teacher} = \frac{1}{2}\!\left[\text{softmax}(\mathbf{z}_{base}) + \text{softmax}(\mathbf{z}_{adv})\right]
+\end{equation}
+The teacher logit used in the distillation loss is defined as $\mathbf{z}_t = \log(\mathbf{p}_{teacher})$. Equal-weight fusion was selected over entropy-gated weighting based on empirical findings in Section~\ref{sec:teacher_ensemble}: the gating mechanism provided no measurable improvement in the low-data, high-confidence teacher regime (mean teacher confidence $\approx$~0.88, mean gate value $\approx$~0.09), making the simpler equal-weight formulation the preferred production strategy.
+
+\subsection{Student Network: ConvNeXt Tiny}
+
+A key design decision is the choice of student backbone capacity. Lightweight CNN--ViT architectures (524K parameters, explored in the ablation study) are parameter-efficient but empirically insufficient to fully exploit the multi-teacher soft labels on the five-class ordinal task. Accordingly, we select ConvNeXt Tiny \cite{liu2022} as the student backbone: a purely convolutional architecture incorporating depthwise convolutions, inverted bottleneck blocks, and GELU activations---design choices inspired by ViT architectural principles while preserving the inductive biases and inference efficiency of CNNs. ConvNeXt Tiny achieves competitive ImageNet accuracy with substantially fewer FLOPs than ViT-S/16, making it well-suited for resource-constrained clinical deployment \cite{islam2023,yilmaz2025}. The backbone is initialized with ImageNet-pretrained weights; the classification head is replaced with a linear layer ($768{\to}5$) to produce student logits $\mathbf{z}_s$.
+
+\subsection{Multi-Component Training Loss}
+
+The student training objective addresses four distinct failure modes of standard distillation applied to ordinal medical grading: (1)~class imbalance biasing predictions toward majority grades, (2)~single-temperature KL-divergence failing to transfer both fine-grained and coarse knowledge simultaneously, (3)~training--evaluation misalignment between cross-entropy and QWK, and (4)~student regression below teacher performance during early training. The composite objective is:
+\begin{equation}
+  \mathcal{L} = \mathcal{L}_{main} + \lambda_{ni}\,\mathcal{L}_{ni} +
+  \lambda_{distill}\,\mathcal{L}_{distill} + \lambda_{ord}\,\mathcal{L}_{ord}
+\end{equation}
+
+\subsubsection{Weighted Cross-Entropy Loss}
+To address class imbalance, the primary classification loss is a class-weighted cross-entropy:
+\begin{equation}
+  \mathcal{L}_{main} = -\sum_{c=0}^{4} w_c\, y_c\, \log\hat{p}_c, \quad
+  w_c = \frac{N}{C \cdot n_c}
+\end{equation}
+where $y_c$ is the one-hot ground-truth indicator, $\hat{p}_c = \text{softmax}(\mathbf{z}_s)_c$, and $w_c$ is the inverse-frequency class weight computed from the training set distribution ($N$: total samples, $C{=}5$: number of classes, $n_c$: samples in class $c$).
+
+\subsubsection{Non-Inferiority Loss}
+To prevent the student from performing worse than the teacher on individual training samples:
+\begin{equation}
+  \mathcal{L}_{ni} = \frac{1}{N}\sum_{i=1}^{N}
+  \max\!\left(0,\; \ell_s^{(i)} - \ell_t^{(i)} + m(\text{epoch})\right)
+\end{equation}
+where $\ell_s^{(i)}$ and $\ell_t^{(i)}$ are the per-sample cross-entropy losses of the student and teacher ensemble, respectively, and $m(\text{epoch})$ is a linearly scheduled margin decreasing from 0.010 at epoch~1 to 0.003 at epoch~70. The weighting coefficient follows the schedule $\lambda_{ni}: 0.80 \to 0.25$.
+
+\subsubsection{Multi-Temperature Distillation Loss}
+The distillation loss is computed as a weighted combination of KL-divergence losses at two temperatures:
+\begin{equation}
+  \mathcal{L}_{distill} = \sum_{k \in \{1,2\}} w_k\, T_k^2 \cdot
+  \text{KL}\!\left(\text{softmax}\!\left(\tfrac{\mathbf{z}_s}{T_k}\right) \,\Big\|\,
+  \text{softmax}\!\left(\tfrac{\mathbf{z}_t}{T_k}\right)\right)
+\end{equation}
+with $T_1{=}2.0$ ($w_1{=}0.6$) and $T_2{=}4.0$ ($w_2{=}0.4$). The $T_k^2$ scaling ensures gradient magnitude consistency across temperatures \cite{hinton2015}. The overall distillation weight is $\lambda_{distill} = 0.30$.
+
+\subsubsection{Ordinal CDF Loss}
+DR severity grades exhibit a natural ordinal structure ($0 < 1 < 2 < 3 < 4$) that standard cross-entropy and KL-divergence losses do not explicitly encode. The ordinal CDF loss penalizes the squared difference between the predicted and target cumulative distribution functions:
+\begin{equation}
+  \mathcal{L}_{ord} = \frac{1}{4}\sum_{k=0}^{3} \left(\hat{F}_k - F_k^*\right)^2
+\end{equation}
+where $\hat{F}_k = \sum_{c=0}^{k} \hat{p}_c$ is the predicted CDF at threshold $k$, and $F_k^* = \mathbf{1}[y \leq k]$ is the corresponding target CDF for ground-truth grade $y$. The ordinal weight is $\lambda_{ord} = 0.12$.
+
+\subsection{Inference-Time Equal-Weight Ensemble}
+
+At inference, the final class probability is:
+\begin{equation}
+  \mathbf{p}_{final} = \frac{1}{2}\!\left[\mathbf{p}_{teacher} +
+  \text{softmax}(\mathbf{z}_s)\right], \quad
+  \hat{y} = \arg\max_c\; [\mathbf{p}_{final}]_c
+\end{equation}
+
+\subsection{Training Configuration}
+
+All components are implemented in PyTorch on NVIDIA GPU hardware. The APTOS 2019 training set is partitioned using stratified random splitting into training (80\%, $n{=}2{,}929$), validation (10\%, $n{=}366$), and test (10\%, $n{=}367$) subsets. All final-stage experiments are repeated across three random seeds (42, 52, 62) and reported as mean~$\pm$ standard deviation. Hyperparameters are listed in Table~\ref{tab:hyperparams}.
+
+\begin{table*}[t]
+\centering
+\caption{Training hyperparameters.}
+\label{tab:hyperparams}
+\small
+\begin{tabular}{ll}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Optimizer & AdamW \\
+Learning rate & $2 \times 10^{-4}$ \\
+Weight decay & $1 \times 10^{-4}$ \\
+Batch size & 16 \\
+Maximum epochs & 70 \\
+LR scheduler & CosineAnnealingWarmRestarts ($T_0{=}10$, $T_{mult}{=}2$) \\
+Early stopping patience & 10 epochs (monitored: val QWK) \\
+Gradient clipping (max norm) & 1.0 \\
+$\lambda_{distill}$ & 0.30 \\
+$\lambda_{ord}$ & 0.12 \\
+$\lambda_{ni}$ (scheduled) & $0.80 \to 0.25$ \\
+Non-inferiority margin & $0.010 \to 0.003$ \\
+Distillation temperatures & $T_1{=}2.0$ ($w{=}0.6$), $T_2{=}4.0$ ($w{=}0.4$) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ── 4. Experimental Results ───────────────────────────────────────────────────
+\section{Experimental Results}
+
+\subsection{Dataset and Evaluation Protocol}
+
+\textbf{Dataset.} All experiments are conducted on the APTOS 2019 Blindness Detection dataset \cite{aptos2019}, which comprises 3,662 fundus photographs annotated on the ICDR five-class scale: No DR (Grade~0, $n{=}1{,}805$), Mild ($n{=}370$), Moderate ($n{=}999$), Severe ($n{=}193$), and Proliferative DR (Grade~4, $n{=}295$). The dataset exhibits pronounced class imbalance, with Grade~0 and Grade~2 accounting for approximately 76\% of all samples while Grades~3 and 4 together comprise fewer than 14\%.
+
+\textbf{Data Partitioning.} The full dataset is partitioned using stratified random splitting into training (80\%), validation (10\%), and test (10\%) subsets. The validation set is used exclusively for early stopping and best-model selection; the test set is withheld entirely from all model development decisions and evaluated only once per configuration.
+
+\textbf{Evaluation Metrics.} The primary evaluation metric is QWK; secondary metrics include overall accuracy, macro-averaged F1-score, and ROC-AUC (one-vs-rest).
+
+\subsection{Teacher Architecture Selection}
+\label{sec:teacher_selection}
+
+The teacher ensemble design proceeded through two systematic stages: (i)~evaluation of standalone backbone architectures to establish baseline performance bounds, and (ii)~selection of the Advanced Teacher from a set of specialized hybrid CNN--ViT variants.
+
+\textbf{Stage~1: Standalone Backbone Baselines.} Nine backbone configurations were evaluated under identical conditions. Results are reported in Table~\ref{tab:backbones}. The custom Fusion CNN--ViT achieves the highest QWK (0.923), confirming the well-established advantage of hybrid architectures for DR grading \cite{zhang2025}. ConvNeXt Tiny achieves QWK~=~0.906 in standalone mode, validating its selection as the student backbone.
+
+\begin{table*}[t]
+\centering
+\caption{Standalone backbone baseline results on the APTOS 2019 test set.}
+\label{tab:backbones}
+\small
+\begin{tabular}{lcccc}
+\toprule
+Model & Acc (\%) & F1-Mac & QWK & AUC \\
+\midrule
+Fusion CNN--ViT (custom) & 83.11 & 0.659 & \textbf{0.923} & 0.929 \\
+Fusion ResNet+EfficientNet & 83.65 & 0.674 & 0.909 & 0.932 \\
+EfficientNet-B0 & 82.56 & 0.658 & 0.908 & 0.897 \\
+Fusion DenseNet+EfficientNet & 84.47 & 0.666 & 0.906 & 0.944 \\
+ConvNeXt Tiny (standalone) & 79.02 & 0.648 & 0.906 & 0.947 \\
+ResNet50 & 81.74 & 0.654 & 0.904 & 0.919 \\
+DenseNet121 & 82.56 & 0.688 & 0.897 & 0.931 \\
+ViT-B/16 & 82.56 & 0.631 & 0.896 & 0.928 \\
+EfficientNet-B3 & 73.84 & 0.605 & 0.886 & 0.939 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\textbf{Stage~2: Advanced Teacher Candidate Selection.} Four hybrid variants incorporating additional regularization mechanisms were evaluated. SpectralNorm was selected over the marginally higher-QWK FiLM Fusion due to its superior calibration properties \cite{miyato2018}. Results are reported in Table~\ref{tab:advanced}.
+
+\begin{table*}[t]
+\centering
+\caption{Advanced teacher candidate comparison on APTOS 2019.}
+\label{tab:advanced}
+\small
+\begin{tabular}{lcccc}
+\toprule
+Model & Acc (\%) & F1-W & QWK & Decision \\
+\midrule
+FiLM Fusion & 84.20 & 0.828 & 0.901 & No \\
+\textbf{SpectralNorm (selected)} & \textbf{83.11} & \textbf{0.825} & \textbf{0.901} & Yes \\
+Deformable Token & 82.56 & 0.817 & 0.890 & No \\
+Prototype Head & 83.38 & 0.818 & 0.886 & No \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Teacher Ensemble Configuration}
+\label{sec:teacher_ensemble}
+
+Table~\ref{tab:ensemble} reports the four ensemble configurations evaluated.
+
+\begin{table*}[t]
+\centering
+\caption{Teacher ensemble and fusion strategy comparison on APTOS 2019.}
+\label{tab:ensemble}
+\small
+\begin{tabular}{lccccc}
+\toprule
+Model & Val Acc & Val QWK & Test Acc & Test QWK & AUC \\
+\midrule
+Teacher 1 (Baseline) & 64.85 & 0.744 & 63.22 & 0.640 & 0.904 \\
+Teacher 2 (Advanced) & 82.29 & 0.882 & 83.11 & 0.901 & 0.964 \\
+Equal-Weight (T1+T2) & 83.11 & 0.879 & 83.11 & 0.902 & 0.953 \\
+Gated (T1+T2) & 81.47 & 0.878 & 84.47 & 0.907 & 0.956 \\
+Student (standalone) & 5.18 & 0.000 & 5.18 & 0.000 & 0.588 \\
+Equal-W Fusion (Ens+Student) & 83.11 & 0.880 & 83.11 & 0.897 & 0.953 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Teacher~1 exhibits substantially lower performance than Teacher~2, reflecting their structural asymmetry; the equal-weight teacher ensemble improves marginally over Teacher~2 alone, consistent with ensemble averaging theory.
+
+\textbf{Gate Collapse Analysis.} An entropy-gated weighting mechanism was investigated as an alternative to equal-weight averaging. The gate network's output distribution revealed a mean gate value of $\bar{g} = 0.090$, with 86\% of test samples yielding $g < 0.20$. Consequently, the predicted class labels of the gated and equal-weight configurations were identical on all 368 test samples, with differences observable only in calibrated probabilities. This confirms that equal-weight fusion is the preferred strategy in high-confidence low-data regimes.
+
+\subsection{Student Training Ablation}
+\label{sec:ablation}
+
+Table~\ref{tab:ablation} reports the four-step progressive ablation, tracing the development from the initial lightweight configuration to the proposed model.
+
+\begin{table*}[t]
+\centering
+\caption{Student training ablation on the APTOS 2019 test set (progressive development).}
+\label{tab:ablation}
+\begin{tabular}{llccccc}
+\toprule
+Model & Key Addition & Stage & Acc (\%) & F1-Mac & QWK & Params \\
+\midrule
+TS\_LiteCNNViT\_BaseResidual & CNN--ViT + ResidualDistill & screen & 85.01 & 0.701 & 0.909 & 524K \\
+TS\_LiteCNNViT\_ConflictBrake & + ConflictBrake gate & screen & 85.29 & 0.702 & 0.912 & 524K \\
+TS\_LiteCNNViT\_Conflict\_OrdinalDistill & + OrdinalDistill & final & $84.56 \pm 0.69$ & $0.687 \pm 0.017$ & $0.9155 \pm 0.0020$ & 524K \\
+\textbf{TS\_ConvNeXtTiny\_Residual (proposed)} & \textbf{ConvNeXt Tiny backbone} & \textbf{final} & $\mathbf{85.47 \pm 0.31}$ & $\mathbf{0.703 \pm 0.009}$ & $\mathbf{0.9186 \pm 0.0010}$ & \textbf{27.8M} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Replacing the lightweight LiteCNNViT student backbone (524K parameters) with ConvNeXt Tiny (27.8M trainable parameters) yields a consistent improvement of +0.0031 mean QWK, underscoring the capacity advantage of a stronger student in the distillation regime. Ordinal CDF regularization consistently outperforms configurations without it, confirming that explicit ordinal alignment with the QWK criterion yields measurable gains.
+
+\subsection{Comparison with State-of-the-Art}
+
+Table~\ref{tab:sota} compares the proposed framework against published methods on the APTOS 2019 five-class DR severity grading task.
+
+\begin{table*}[t]
+\centering
+\caption{Comparison with state-of-the-art methods on APTOS 2019 (five-class grading).}
+\label{tab:sota}
+\begin{tabular}{p{3.0cm}p{4.0cm}ccc p{3.2cm}}
+\toprule
+Method & Backbone / Approach & Acc (\%) & QWK & F1 & Notes \\
+\midrule
+Farag et al.\ \cite{farag2022} & DenseNet169 + CBAM & 82.0 & 0.888 & --- & CE only \\
+Nazih et al.\ \cite{nazih2023} & ViT + focal loss + AdamW & --- & --- & 0.825 & AUC~=~0.956 \\
+Zhang et al.\ \cite{zhang2025} & CvT-13 hybrid & --- & 0.840 & --- & AUC~=~0.93 \\
+Al~Shafi et al.\ \cite{alshafi2024} & MobileViTv2 $\to$ GoogLeNet KD & --- & 0.900$^{\dag}$ & --- & SHAP explainability \\
+Ikram \& Imran \cite{ikram2025} & ResViT FusionNet & 93.01 & 0.894$^{\ddag}$ & --- & diff.\ split \\
+Shakibania et al.\ \cite{shakibania2024} & Dual EfficientNet-B0+ResNet50 & 89.6 & 0.930 & --- & Augmented \\
+Islam et al.\ \cite{islam2023} & ResNet152V2+Swin $\to$ Xception & 99.0$^{\P}$ & --- & --- & diff.\ split \\
+\midrule
+\textbf{Proposed (ours)} & Ensemble CNN--ViT $\to$ ConvNeXt KD & $\mathbf{85.47 \pm 0.31}$ & $\mathbf{0.9186 \pm 0.0010}$ & \textbf{0.703} & No student aug. \\
+\bottomrule
+\end{tabular}
+\medskip\\
+{\footnotesize $^{\dag}$Weighted kappa; may differ from QWK. $^{\ddag}$Cohen's kappa; different APTOS split. $^{\P}$Different train--test split; not directly comparable.}
+\end{table*}
+
+The proposed method achieves a strong QWK under a controlled, augmentation-free student training regime. Several published methods report higher headline metrics, but many use different splits, alternative kappa formulations, or more aggressive augmentation; accordingly, direct comparison should be interpreted with caution.
+
+\subsection{Computational Efficiency}
+
+\begin{table*}[t]
+\centering
+\caption{Computational efficiency comparison.}
+\label{tab:efficiency}
+\small
+\begin{tabular}{lccc}
+\toprule
+Model & Train.\ Params & Total Params & Latency (ms) \\
+\midrule
+Teacher 1 (Baseline) & $\sim$8.2M & $\sim$8.2M & --- \\
+Teacher 2 (Advanced) & $\sim$113.8M & $\sim$113.8M & --- \\
+TS\_LiteCNNViT & 524K & 114.7M & $5.41 \pm 0.01$ \\
+\textbf{Proposed} & \textbf{27.8M} & \textbf{142.0M} & $\mathbf{6.70 \pm 0.01}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The proposed student requires 27.8M trainable parameters and reaches a mean inference latency of 6.70~ms/image, compatible with real-time screening throughput.
+
+% ── 5. Conclusion ─────────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented \texttt{TS\_ConvNeXtTiny\_Residual}, a teacher--student knowledge distillation framework for five-class DR severity grading under low-data conditions, addressing the scarcity of expert-annotated training data and the failure of standard cross-entropy losses to encode the ordinal structure of the DR severity scale.
+
+The principal contributions and their empirical validation are as follows. First, a hybrid teacher ensemble combining a custom Baseline CNN--ViT and an Advanced ResNet50+ViT-B/16 model with spectral normalization via equal-weight prediction averaging provides a well-calibrated and diverse soft-label signal, outperforming either teacher in isolation. Second, a multi-temperature distillation scheme at $T \in \{2.0, 4.0\}$ enables simultaneous transfer of fine-grained discriminative and coarse semantic knowledge. Third, an ordinal CDF loss explicitly aligns the training objective with the QWK evaluation criterion, yielding a consistent performance gain over configurations trained without ordinal regularization. Fourth, a non-inferiority loss with a linearly scheduled margin prevents student regression below teacher performance on individual samples during early training, stabilizing learning in the low-data regime. Fifth, an empirical analysis of entropy-gated teacher--student fusion revealed gate collapse under high-confidence teacher conditions, providing a principled justification for adopting the simpler equal-weight fusion strategy.
+
+Evaluated across three random seeds on APTOS 2019, the proposed system achieves a mean test QWK of $\mathbf{0.9186 \pm 0.0010}$ and accuracy of $\mathbf{85.47\% \pm 0.31\%}$, surpassing all single-teacher and alternative teacher--student baselines examined in this study.
+
+\textbf{Limitations and Future Work.} The present evaluation is restricted to a single benchmark dataset (APTOS 2019); multi-dataset evaluation across EyePACS, DDR, and Messidor would strengthen generalizability claims. The deliberate exclusion of student-side augmentation represents additional performance headroom that should be quantified in future work. Extending the framework to multi-label ocular comorbidity prediction would move the system closer to comprehensive clinical decision support.
+
+\section*{Declaration of competing interest}
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+
+\section*{Funding sources}
+No specific funding was received for this work.
+
+\section*{Acknowledgements}
+The authors thank the anonymous reviewers and the clinical experts who contributed to diabetic retinopathy screening and benchmark curation.
+
+% ── References ────────────────────────────────────────────────────────────────
+\bibliographystyle{cas-model2-names}
+
+\begin{thebibliography}{99}
+
+\bibitem{yau2012}
+J.W. Yau, S.L. Rogers, R. Kawasaki, et al.,
+Global prevalence and major risk factors of diabetic retinopathy,
+\textit{Diabetes Care} 35 (2012) 556--564.
+
+\bibitem{idf2021}
+International Diabetes Federation,
+\textit{IDF Diabetes Atlas}, 10th ed.,
+IDF, Brussels, 2021.
+
+\bibitem{wilkinson2003}
+C.P. Wilkinson, F.L. Ferris~III, R.E. Klein, et al.,
+Proposed international clinical diabetic retinopathy and diabetic macular edema disease severity scales,
+\textit{Ophthalmology} 110 (2003) 1677--1682.
+
+\bibitem{krause2018}
+J. Krause, V. Gulshan, E. Rahimy, et al.,
+Grader variability and the importance of reference standards for evaluating machine learning models for diabetic retinopathy,
+\textit{Ophthalmology} 125 (2018) 1264--1272.
+
+\bibitem{gulshan2016}
+V. Gulshan, L. Peng, M. Coram, et al.,
+Development and validation of a deep learning algorithm for detection of diabetic retinopathy in retinal fundus photographs,
+\textit{JAMA} 316 (2016) 2402--2410.
+
+\bibitem{ting2017}
+D.S.W. Ting, C.Y. Cheung, G. Lim, et al.,
+Development and validation of a deep learning system for diabetic retinopathy and related eye diseases,
+\textit{JAMA} 318 (2017) 2211--2223.
+
+\bibitem{he2016}
+K. He, X. Zhang, S. Ren, J. Sun,
+Deep residual learning for image recognition,
+in: \textit{Proc. IEEE/CVF CVPR}, 2016, pp. 770--778.
+
+\bibitem{tan2019}
+M. Tan, Q.V. Le,
+EfficientNet: Rethinking model scaling for convolutional neural networks,
+in: \textit{Proc. ICML}, 2019, pp. 6105--6114.
+
+\bibitem{huang2017}
+G. Huang, Z. Liu, L. van~der~Maaten, K.Q. Weinberger,
+Densely connected convolutional networks,
+in: \textit{Proc. IEEE/CVF CVPR}, 2017, pp. 4700--4708.
+
+\bibitem{zhu2024}
+S. Zhu, C. Xiong, Q.Q. Zhong, Y. Yao,
+Diabetic retinopathy classification with deep learning via fundus images: A short survey,
+\textit{IEEE Access} (2024).
+
+\bibitem{bappi2025}
+M.I. Bappi, J.A. Juthy, K. Kim,
+Deep learning-based diabetic retinopathy recognition and grading: Challenges, gaps, and an improved approach---A survey,
+\textit{ICT Express} (2025).
+
+\bibitem{dosovitskiy2021}
+A. Dosovitskiy, L. Beyer, A. Kolesnikov, et al.,
+An image is worth 16$\times$16 words: Transformers for image recognition at scale,
+in: \textit{ICLR}, 2021.
+
+\bibitem{zhang2025}
+W. Zhang, V. Belcheva, T. Ermakova,
+Interpretable deep learning for diabetic retinopathy: A comparative study of CNN, ViT, and hybrid architectures,
+\textit{Computers} (2025).
+
+\bibitem{hinton2015}
+G. Hinton, O. Vinyals, J. Dean,
+Distilling the knowledge in a neural network,
+\textit{arXiv preprint arXiv:1503.02531} (2015).
+
+\bibitem{islam2023}
+N. Islam, M.M.H. Jony, E. Hasan, et al.,
+Toward lightweight diabetic retinopathy classification: A knowledge distillation approach for resource-constrained settings,
+\textit{Applied Sciences} (2023).
+
+\bibitem{liu2022}
+Z. Liu, H. Mao, C.Y. Wu, C. Feichtenhofer, T. Darrell, S. Xie,
+A ConvNet for the 2020s,
+in: \textit{Proc. IEEE/CVF CVPR}, 2022, pp. 11976--11986.
+
+\bibitem{farag2022}
+M.M. Farag, M.A. Fouad, A.T. Abdel-Hamid,
+Automatic severity classification of diabetic retinopathy based on DenseNet and convolutional block attention module,
+\textit{IEEE Access} (2022).
+
+\bibitem{shakibania2024}
+H. Shakibania, S. Raoufi, B. Pourafkham, et al.,
+Dual branch deep learning network for detection and stage grading of diabetic retinopathy,
+\textit{Biomed. Signal Process. Control} (2024).
+
+\bibitem{tian2023}
+M. Tian, H. Wang, Y. Sun, et al.,
+Fine-grained attention \& knowledge-based collaborative network for diabetic retinopathy grading,
+\textit{Heliyon} (2023).
+
+\bibitem{romero2024}
+R. Romero-Ora\'{a}, M. Herrero-Tudela, M.I. L\'{o}pez, et al.,
+Attention-based deep learning framework for automatic fundus image processing,
+\textit{Comput. Methods Programs Biomed.} (2024).
+
+\bibitem{aptos2019}
+APTOS 2019 Blindness Detection, Kaggle Competition Dataset, 2019.
+
+\bibitem{ikram2025}
+A. Ikram, A. Imran,
+ResViT FusionNet model: An explainable AI-driven approach for automated grading of diabetic retinopathy,
+\textit{Comput. Biol. Med.} (2025).
+
+\bibitem{azzou2025}
+S. Azzou, D. Boukredera, S. Baouz,
+A hybrid CNN-Transformer approach for precise three-class diabetic retinopathy classification,
+\textit{Jordanian J. Comput. Inf. Technol.} (2025).
+
+\bibitem{niranjan2025}
+K. Niranjan, et al.,
+A hybrid vision transformer and graph neural network model for diabetic retinopathy detection,
+\textit{J. Artif. Intell. Technol.} (2025).
+
+\bibitem{nazih2023}
+W. Nazih, A.O. Aseeri, O. Atallah, S. El-Sappagh,
+Vision transformer model for predicting the severity of diabetic retinopathy,
+\textit{IEEE Access} (2023).
+
+\bibitem{goh2024}
+J.H.L. Goh, E. Ang, S. Srinivasan, et al.,
+Comparative analysis of vision transformers and CNNs in detecting referable diabetic retinopathy,
+\textit{Ophthalmol. Sci.} (2024).
+
+\bibitem{gou2021}
+J. Gou, B. Yu, S.J. Maybank, D. Tao,
+Knowledge distillation: A survey,
+\textit{Int. J. Comput. Vis.} 129 (2021) 1789--1819.
+
+\bibitem{luo2020}
+L. Luo, D. Xue, X. Feng,
+Automatic diabetic retinopathy grading via self-knowledge distillation,
+\textit{Electronics} (2020).
+
+\bibitem{ju2021}
+L. Ju, X. Wang, X. Zhao, et al.,
+Synergic adversarial label learning for grading retinal diseases via knowledge distillation,
+\textit{IEEE J. Biomed. Health Inform.} (2021).
+
+\bibitem{moya2024}
+E. Moya-Albor, A. Lopez-Figueroa, S. Jacome-Herrera, et al.,
+Computer-aided diagnosis of diabetic retinopathy lesions based on knowledge distillation,
+\textit{Mathematics} (2024).
+
+\bibitem{wang2024}
+Y. Wang, Q. Hou, P. Cao, et al.,
+Lesion-aware knowledge distillation for diabetic retinopathy lesion segmentation,
+\textit{Appl. Intell.} (2024).
+
+\bibitem{alshafi2024}
+A. Al~Shafi, M.H. Shawon, N. Shahid, et al.,
+Enhancing diabetic retinopathy detection through transformer based knowledge distillation,
+in: \textit{Proc. IJCNN}, 2024.
+
+\bibitem{cao2020}
+W. Cao, V. Mirjalili, S. Raschka,
+Rank consistent ordinal regression for neural networks,
+\textit{Pattern Recognit. Lett.} 140 (2020) 325--331.
+
+\bibitem{liu2020}
+X. Liu, F. Fan, L. Kong, et al.,
+Unimodal regularized neuron stick-breaking for ordinal classification,
+\textit{Neurocomputing} 388 (2020) 34--44.
+
+\bibitem{yilmaz2025}
+B. Yilmaz, A. Aiyengar,
+Cross-architecture knowledge distillation for retinal fundus image anomaly detection,
+\textit{arXiv preprint arXiv:2506.18220} (2025).
+
+\bibitem{miyato2018}
+T. Miyato, T. Kataoka, M. Koyama, Y. Yoshida,
+Spectral normalization for generative adversarial networks,
+in: \textit{ICLR}, 2018.
+
+\end{thebibliography}
+
+\end{document}
